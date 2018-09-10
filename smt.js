@@ -13,6 +13,8 @@ var path = require('path')
 let htmlcon = ''
 let reqCookies = ''
 let flag = false
+let loginToken=''
+let loginedCookies=''
 //转换buffer类
 function transformBuffer(data) {
     var result = JSON.stringify(data)
@@ -185,7 +187,6 @@ function scanQrcode() {
         });
     });
     console.log(scanQrcodeRes)
-    // console.log(scanQrcodeRes.headers.cookie)
     scanQrcodeRes.on('error', (e) => {
         ctx.body = {
             msg: e
@@ -194,11 +195,11 @@ function scanQrcode() {
     scanQrcodeRes.end();
 }
 function getLoginToken() {
-    //扫描二维码配置
+    //获取登录token配置
     let loginTokenOption = {
         host: 'mp.weixin.qq.com',
         path: '/cgi-bin/bizlogin?action=login&lang=zh_CN',
-        method: 'GET',
+        method: 'POST',
         port: 443,
         headers: {
             'Host': 'mp.weixin.qq.com',
@@ -212,11 +213,18 @@ function getLoginToken() {
             'X-Requested-With': 'XMLHttpRequest'
         }
     }
-    //获取保存图片请求
+    //获取token响应
     const loginTokenRes = https.get(loginTokenOption, (req) => {
-        //获取内容为json串
         req.on('data', (d) => {
-            console.log("data:", JSON.stringify(d))
+            let data = transformBuffer(d);
+            console.log("DATA:",data)
+            if(JSON.parse(data).redirect_url){
+                let url = JSON.parse(data).redirect_url;
+                loginToken = url.slice(30,40);
+                //获取浏览器cookie
+                reqCookies = req.headers["set-cookie"];
+                console.log("loginedCookies:",reqCookies)
+            }
             // let data = JSON.parse(d);
             // console.log("data:",data)
         });
@@ -228,14 +236,51 @@ function getLoginToken() {
     });
     loginTokenRes.end();
 }
+function getLoginedData(){
+    //登陆后数据获取配置
+    let loginedDataOption = {
+        host: 'mp.weixin.qq.com',
+        path: '/wxopen/home?lang=zh_CN&token='+loginToken,
+        method: 'GET',
+        port: 443,
+        headers: {
+            'Host': 'mp.weixin.qq.com',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:61.0) Gecko/20100101 Firefox/61.0',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': 'https://mp.weixin.qq.com/cgi-bin/bizlogin?action=validate&lang=zh_CN&account=466940702%40qq.com',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Cookie': reqCookies,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests':1
+        }
+    }
+    const loginedDataRes = https.get(loginedDataOption, (req) => {
+        //获取内容为json串
+        req.on('data', (d) => {
+            console.log(d)
+            console.log(d.toString())
+            htmlcon = transformBuffer(d);
+            console.log(htmlcon)
+        });
+    });
+    loginedDataRes.on('error', (e) => {
+        ctx.body = {
+            msg: e
+        }
+    });
+    loginedDataRes.end();
+}
 router.get('/', async (ctx, next) => {
     //微信登录
     wechatLogin();
-    await funPromise(3000);
+    await funPromise(2000);
     //获取扫描二维码
     getQrcode();
     //确认是否扫描二维码
-    var scanTime = setInterval(() => {
+    var scanTime = setInterval(async () => {
         console.log(flag)
         if (!flag) {
             scanQrcode();
@@ -243,12 +288,16 @@ router.get('/', async (ctx, next) => {
             clearInterval(scanTime);
             //获取确认通过的token
             getLoginToken();
+            //给浏览器设置cookie
+            // setHtmlCookies(ctx,loginedCookies);
+            await funPromise(2000);
+            //正式访问登录后页面内容
+            getLoginedData();
+            ctx.body = {
+                data:htmlcon
+            }
         }
     }, 1000);
-    ctx.body = {
-        msg: "请扫描图片!",
-        code: "0000"
-    }
 })
 app.use(router.routes())
 
